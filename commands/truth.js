@@ -1,22 +1,28 @@
-const fetch = require('node-fetch');
+const axios = require('axios');
+const settings = require('../settings');
+
+const RUNFLIX_BASE = 'https://api.runflix.name.ng';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+
+async function runflixGet(endpoint, params = {}) {
+    const url = `${RUNFLIX_BASE}${endpoint}`;
+    const queryParams = new URLSearchParams({ apikey: settings.runflixApiKey || 'daratech', ...params });
+    const response = await axios.get(`${url}?${queryParams.toString()}`, {
+        timeout: 30000,
+        headers: { 'User-Agent': UA }
+    });
+    if (response.data?.success === true) return response.data.result;
+    if (response.data?.success === false) throw new Error(response.data.message || 'API error');
+    return response.data;
+}
 
 async function truthCommand(sock, chatId, message) {
     try {
-        const shizokeys = 'shizo';
-        const res = await fetch(`https://shizoapi.onrender.com/api/texts/truth?apikey=${shizokeys}`);
-        
-        if (!res.ok) {
-            throw await res.text();
-        }
-        
-        const json = await res.json();
-        const truthMessage = json.result;
-
-        // Send the truth message
-        await sock.sendMessage(chatId, { text: truthMessage }, { quoted: message });
+        const truth = await runflixGet('/fun/truth');
+        await sock.sendMessage(chatId, { text: `🎯 *TRUTH*\n\n${truth}` }, { quoted: message });
     } catch (error) {
-        console.error('Error in truth command:', error);
-        await sock.sendMessage(chatId, { text: '❌ Failed to get truth. Please try again later!' }, { quoted: message });
+        console.error('Truth error:', error.message);
+        await sock.sendMessage(chatId, { text: '❌ Failed to get truth. Please try again later.' }, { quoted: message });
     }
 }
 

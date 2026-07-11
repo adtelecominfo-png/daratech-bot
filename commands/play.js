@@ -1,5 +1,21 @@
-const yts = require('yt-search');
 const axios = require('axios');
+const yts = require('yt-search');
+const settings = require('../settings');
+
+const RUNFLIX_BASE = 'https://api.runflix.name.ng';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+
+async function runflixGet(endpoint, params = {}) {
+    const url = `${RUNFLIX_BASE}${endpoint}`;
+    const queryParams = new URLSearchParams({ apikey: settings.runflixApiKey || 'daratech', ...params });
+    const response = await axios.get(`${url}?${queryParams.toString()}`, {
+        timeout: 60000,
+        headers: { 'User-Agent': UA }
+    });
+    if (response.data?.success === true) return response.data.result;
+    if (response.data?.success === false) throw new Error(response.data.message || 'API error');
+    return response.data;
+}
 
 async function playCommand(sock, chatId, message) {
     try {
@@ -7,56 +23,41 @@ async function playCommand(sock, chatId, message) {
         const searchQuery = text.split(' ').slice(1).join(' ').trim();
         
         if (!searchQuery) {
-            return await sock.sendMessage(chatId, { 
-                text: "What song do you want to download?"
-            });
+            await sock.sendMessage(chatId, { text: "What song do you want to download?" });
+            return;
         }
 
-        // Search for the song
-        const { videos } = await yts(searchQuery);
-        if (!videos || videos.length === 0) {
-            return await sock.sendMessage(chatId, { 
-                text: "No songs found!"
-            });
+        let video;
+        if (searchQuery.includes('youtube.com') || searchQuery.includes('youtu.be')) {
+            video = { url: searchQuery };
+        } else {
+            const { videos } = await yts(searchQuery);
+            if (!videos || videos.length === 0) {
+                return await sock.sendMessage(chatId, { text: "No songs found!" });
+            }
+            video = videos[0];
         }
 
-        // Send loading message
         await sock.sendMessage(chatId, {
             text: "_Please wait your download is in progress_"
         });
 
-        // Get the first video result
-        const video = videos[0];
-        const urlYt = video.url;
+        const audioData = await runflixGet('/download/ytmp3', { url: video.url });
 
-        // Fetch audio data from API
-        const response = await axios.get(`https://apis-keith.vercel.app/download/dlmp3?url=${urlYt}`);
-        const data = response.data;
+        if (!audioData?.download_url) throw new Error('No download URL');
 
-        if (!data || !data.status || !data.result || !data.result.downloadUrl) {
-            return await sock.sendMessage(chatId, { 
-                text: "Failed to fetch audio from the API. Please try again later."
-            });
-        }
-
-        const audioUrl = data.result.downloadUrl;
-        const title = data.result.title;
-
-        // Send the audio
+        const title = audioData.title || video.title || 'song';
+        
         await sock.sendMessage(chatId, {
-            audio: { url: audioUrl },
+            audio: { url: audioData.download_url },
             mimetype: "audio/mpeg",
             fileName: `${title}.mp3`
         }, { quoted: message });
 
     } catch (error) {
-        console.error('Error in song2 command:', error);
-        await sock.sendMessage(chatId, { 
-            text: "Download failed. Please try again later."
-        });
+        console.error('Error in play command:', error);
+        await sock.sendMessage(chatId, { text: "Download failed. Please try again later." });
     }
 }
 
-module.exports = playCommand; 
-
-/* Powered by Daratech Bot */
+module.exports = playCommand;

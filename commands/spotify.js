@@ -1,54 +1,52 @@
 const axios = require('axios');
+const settings = require('../settings');
+
+const RUNFLIX_BASE = 'https://api.runflix.name.ng';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+async function runflixGet(endpoint, params = {}) {
+    const url = `${RUNFLIX_BASE}${endpoint}`;
+    const queryParams = new URLSearchParams({ apikey: settings.runflixApiKey || 'daratech', ...params });
+    const response = await axios.get(`${url}?${queryParams.toString()}`, {
+        timeout: 30000,
+        headers: { 'User-Agent': UA }
+    });
+    if (response.data?.success === true) return response.data.result;
+    if (response.data?.success === false) throw new Error(response.data.message || 'API error');
+    return response.data;
+}
 
 async function spotifyCommand(sock, chatId, message) {
     try {
-        const rawText = message.message?.conversation?.trim() ||
-            message.message?.extendedTextMessage?.text?.trim() ||
-            message.message?.imageMessage?.caption?.trim() ||
-            message.message?.videoMessage?.caption?.trim() ||
-            '';
-
-        const used = (rawText || '').split(/\s+/)[0] || '.spotify';
-        const query = rawText.slice(used.length).trim();
-
+        const text = message.message?.conversation || message.message?.extendedTextMessage?.text || '';
+        const query = text.split(' ').slice(1).join(' ').trim();
+        
         if (!query) {
-            await sock.sendMessage(chatId, { text: 'Usage: .spotify <song/artist/keywords>\nExample: .spotify con calma' }, { quoted: message });
+            await sock.sendMessage(chatId, { text: 'Please provide a Spotify link or track name.' }, { quoted: message });
             return;
         }
 
-        const apiUrl = `https://okatsu-rolezapiiz.vercel.app/search/spotify?q=${encodeURIComponent(query)}`;
-        const { data } = await axios.get(apiUrl, { timeout: 20000, headers: { 'user-agent': 'Mozilla/5.0' } });
+        await sock.sendMessage(chatId, { text: '🎵 Searching Spotify...' }, { quoted: message });
 
-        if (!data?.status || !data?.result) {
-            throw new Error('No result from Spotify API');
+        let spotifyUrl = query;
+        if (!query.includes('spotify.com')) {
+            const searchResult = await runflixGet('/download/spotifydl', { url: query });
+            if (spotifyUrl) spotifyUrl = searchResult?.spotify_url || query;
         }
 
-        const r = data.result;
-        const audioUrl = r.audio;
-        if (!audioUrl) {
-            await sock.sendMessage(chatId, { text: 'No downloadable audio found for this query.' }, { quoted: message });
-            return;
-        }
+        const result = await runflixGet('/download/spotifydlv4', { url: spotifyUrl });
 
-        const caption = `🎵 ${r.title || r.name || 'Unknown Title'}\n👤 ${r.artist || ''}\n⏱ ${r.duration || ''}\n🔗 ${r.url || ''}`.trim();
+        if (!result?.download_url) throw new Error('No download URL');
 
-         // Send cover and info as a follow-up (optional)
-         if (r.thumbnails) {
-            await sock.sendMessage(chatId, { image: { url: r.thumbnails }, caption }, { quoted: message });
-        } else if (caption) {
-            await sock.sendMessage(chatId, { text: caption }, { quoted: message });
-        }
         await sock.sendMessage(chatId, {
-            audio: { url: audioUrl },
+            audio: { url: result.download_url },
             mimetype: 'audio/mpeg',
-            fileName: `${(r.title || r.name || 'track').replace(/[\\/:*?"<>|]/g, '')}.mp3`
+            fileName: `${result.title || 'spotify_track'}.mp3`
         }, { quoted: message });
 
-       
-
     } catch (error) {
-        console.error('[SPOTIFY] error:', error?.message || error);
-        await sock.sendMessage(chatId, { text: 'Failed to fetch Spotify audio. Try another query later.' }, { quoted: message });
+        console.error('Spotify error:', error.message);
+        await sock.sendMessage(chatId, { text: '❌ Failed to download from Spotify. Please try a direct link.' }, { quoted: message });
     }
 }
 

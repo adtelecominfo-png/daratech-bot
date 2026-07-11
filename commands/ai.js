@@ -1,5 +1,20 @@
 const axios = require('axios');
-const fetch = require('node-fetch');
+const settings = require('../settings');
+
+const RUNFLIX_BASE = 'https://api.runflix.name.ng';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+async function runflixGet(endpoint, params = {}) {
+    const url = `${RUNFLIX_BASE}${endpoint}`;
+    const queryParams = new URLSearchParams({ apikey: settings.runflixApiKey || 'daratech', ...params });
+    const response = await axios.get(`${url}?${queryParams.toString()}`, {
+        timeout: 60000,
+        headers: { 'User-Agent': UA }
+    });
+    if (response.data?.success === true) return response.data.result;
+    if (response.data?.success === false) throw new Error(response.data.message || 'API error');
+    return response.data;
+}
 
 async function aiCommand(sock, chatId, message) {
     try {
@@ -8,12 +23,9 @@ async function aiCommand(sock, chatId, message) {
         if (!text) {
             return await sock.sendMessage(chatId, { 
                 text: "Please provide a question after .gpt or .gemini\n\nExample: .gpt write a basic html code"
-            }, {
-                quoted: message
-            });
+            }, { quoted: message });
         }
 
-        // Get the command and query
         const parts = text.split(' ');
         const command = parts[0].toLowerCase();
         const query = parts.slice(1).join(' ').trim();
@@ -21,96 +33,37 @@ async function aiCommand(sock, chatId, message) {
         if (!query) {
             return await sock.sendMessage(chatId, { 
                 text: "Please provide a question after .gpt or .gemini"
-            }, {quoted:message});
+            }, { quoted: message });
         }
 
+        await sock.sendMessage(chatId, {
+            react: { text: '🤖', key: message.key }
+        });
+
+        let model = 'deepseek';
+        if (command === '.gpt') model = 'gpt4o';
+        else if (command === '.gemini') model = 'claude'; // Runflix uses claude for gemini
+
         try {
-            // Show processing message
+            const result = await runflixGet('/ai/overchat', { model, q: query });
+            const answer = typeof result === 'string' ? result : result?.result || JSON.stringify(result);
+
             await sock.sendMessage(chatId, {
-                react: { text: '🤖', key: message.key }
-            });
+                text: answer
+            }, { quoted: message });
 
-            if (command === '.gpt') {
-                const apis = [
-                    `https://apis.davidcyril.name.ng/ai/chatgpt?prompt=${encodeURIComponent(query)}`,
-                    `https://api.siputzx.my.id/api/ai/gpt3?prompt=${encodeURIComponent(query)}`,
-                    `https://api.ryzendesu.vip/api/ai/chatgpt?text=${encodeURIComponent(query)}`
-                ];
-
-                for (const api of apis) {
-                    try {
-                        const response = await fetch(api);
-                        const data = await response.json();
-                        const answer = data?.data?.choices?.[0]?.message?.content || data.message || data.data || data.result || data.answer;
-
-                        if (answer) {
-                            await sock.sendMessage(chatId, {
-                                text: answer
-                            }, {
-                                quoted: message
-                            });
-
-                            return;
-                        }
-                    } catch (e) {
-                        continue;
-                    }
-                }
-                throw new Error('All GPT APIs failed');
-            } else if (command === '.gemini') {
-                const apis = [
-                    `https://apis.davidcyril.name.ng/ai/gemini?text=${encodeURIComponent(query)}`,
-                    `https://api.siputzx.my.id/api/ai/gemini-pro?content=${encodeURIComponent(query)}`,
-                    `https://api.ryzendesu.vip/api/ai/gemini?text=${encodeURIComponent(query)}`,
-                    `https://api.giftedtech.my.id/api/ai/geminiai?apikey=gifted&q=${encodeURIComponent(query)}`,
-                    `https://api.giftedtech.my.id/api/ai/geminiaipro?apikey=gifted&q=${encodeURIComponent(query)}`
-                ];
-
-                for (const api of apis) {
-                    try {
-                        const response = await fetch(api);
-                        const data = await response.json();
-
-                        if (data.message || data.data || data.answer || data.result) {
-                            const answer = data.message || data.data || data.answer || data.result;
-                            await sock.sendMessage(chatId, {
-                                text: answer
-                            }, {
-                                quoted: message
-                            });
-                            
-                            return;
-                        }
-                    } catch (e) {
-                        continue;
-                    }
-                }
-                throw new Error('All Gemini APIs failed');
-            }
         } catch (error) {
             console.error('API Error:', error);
             await sock.sendMessage(chatId, {
                 text: "❌ Failed to get response. Please try again later.",
-                contextInfo: {
-                    mentionedJid: [message.key.participant || message.key.remoteJid],
-                    quotedMessage: message.message
-                }
-            }, {
-                quoted: message
-            });
+            }, { quoted: message });
         }
     } catch (error) {
         console.error('AI Command Error:', error);
         await sock.sendMessage(chatId, {
             text: "❌ An error occurred. Please try again later.",
-            contextInfo: {
-                mentionedJid: [message.key.participant || message.key.remoteJid],
-                quotedMessage: message.message
-            }
-        }, {
-            quoted: message
-        });
+        }, { quoted: message });
     }
 }
 
-module.exports = aiCommand; 
+module.exports = aiCommand;

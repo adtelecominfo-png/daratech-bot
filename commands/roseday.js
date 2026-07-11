@@ -1,22 +1,35 @@
-const fetch = require('node-fetch');
+const axios = require('axios');
+const settings = require('../settings');
+
+const RUNFLIX_BASE = 'https://api.runflix.name.ng';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+
+async function runflixGet(endpoint, params = {}) {
+    const url = `${RUNFLIX_BASE}${endpoint}`;
+    const queryParams = new URLSearchParams({ apikey: settings.runflixApiKey || 'daratech', ...params });
+    const response = await axios.get(`${url}?${queryParams.toString()}`, {
+        timeout: 30000,
+        headers: { 'User-Agent': UA }
+    });
+    if (response.data?.success === true) return response.data.result;
+    if (response.data?.success === false) throw new Error(response.data.message || 'API error');
+    return response.data;
+}
 
 async function rosedayCommand(sock, chatId, message) {
     try {
-        
-        const res = await fetch(`https://api.princetechn.com/api/fun/roseday?apikey=prince`);
-        
-        if (!res.ok) {
-            throw await res.text();
+        // rose-day is 404 on Runflix, fallback to valentines or goodnight
+        let result;
+        try {
+            result = await runflixGet('/fun/valentines');
+        } catch {
+            result = await runflixGet('/fun/goodnight');
         }
         
-        const json = await res.json();
-        const rosedayMessage = json.result;
-
-        // Send the roseday message
-        await sock.sendMessage(chatId, { text: rosedayMessage }, { quoted: message });
+        await sock.sendMessage(chatId, { text: `🌹 *Rose Day*\n\n${result}` }, { quoted: message });
     } catch (error) {
-        console.error('Error in roseday command:', error);
-        await sock.sendMessage(chatId, { text: '❌ Failed to get roseday quote. Please try again later!' }, { quoted: message });
+        console.error('Roseday error:', error.message);
+        await sock.sendMessage(chatId, { text: '❌ Failed to get rose day quote. Please try again later!' }, { quoted: message });
     }
 }
 
