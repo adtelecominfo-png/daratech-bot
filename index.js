@@ -268,6 +268,14 @@ async function startXeonBotInc() {
             console.log(chalk.magenta(`${global.themeemoji || '•'} WA NUMBER: ${owner}`))
             console.log(chalk.green(`${global.themeemoji || '•'} 🤖 Bot Connected Successfully! ✅`))
             console.log(chalk.blue(`Bot Version: ${settings.version}`))
+
+            // Initialize auto-update
+            try {
+                const { startAutoUpdate } = require('./commands/autoupdate');
+                startAutoUpdate(XeonBotInc);
+            } catch (e) {
+                console.error('[autoupdate] Failed to initialize:', e.message);
+            }
         }
         
         if (connection === 'close') {
