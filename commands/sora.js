@@ -26,9 +26,14 @@ async function soraCommand(sock, chatId, message) {
             text: `🎬 *Text-to-Video* (experimental)\n\nGenerating: "${input}"\n\nNote: Video generation is slow and may not work for all prompts.`
         }, { quoted: message });
 
-        const { data } = await axios.get(apiUrl, { timeout: 120000, responseType: 'arraybuffer', validateStatus: () => true, headers: { 'user-agent': 'Mozilla/5.0' } });
+        const response = await axios.get(apiUrl, { 
+            timeout: 120000, 
+            responseType: 'arraybuffer', 
+            validateStatus: () => true, 
+            headers: { 'user-agent': 'Mozilla/5.0' } 
+        });
 
-        const contentType = data?.headers?.['content-type'] || '';
+        const contentType = response.headers['content-type'] || '';
         if (!contentType.startsWith('video/')) {
             // Fallback: generate an image instead
             const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(input + ', cinematic, high quality, 4k')}?width=1024&height=1024&nologo=true`;
@@ -43,7 +48,7 @@ async function soraCommand(sock, chatId, message) {
         }
 
         await sock.sendMessage(chatId, {
-            video: data,
+            video: response.data,
             mimetype: 'video/mp4',
             caption: `Prompt: ${input}`
         }, { quoted: message });
