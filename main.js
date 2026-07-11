@@ -150,6 +150,7 @@ const technewsCommand = require('./commands/technews');
 const wallpaperCommand = require('./commands/wallpaper');
 const jailCommand = require('./commands/jail');
 const pairCommand = require('./commands/pair');
+const { autoupdateCommand, startAutoUpdate } = require('./commands/autoupdate');
 
 // Global settings
 global.packname = settings.packname;
@@ -312,7 +313,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
         const isAdminCommand = adminCommands.some(cmd => userMessage.startsWith(cmd));
 
         // List of owner commands
-        const ownerCommands = ['.mode', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.pmblocker', '.pair'];
+        const ownerCommands = ['.mode', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.pmblocker', '.pair', '.autoupdate'];
         const isOwnerCommand = ownerCommands.some(cmd => userMessage.startsWith(cmd));
 
         let isSenderAdmin = false;
@@ -858,6 +859,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage.startsWith('.pair'):
                 await pairCommand(sock, chatId, message);
+                break;
+            case userMessage.startsWith('.autoupdate'):
+                await autoupdateCommand(sock, chatId, message);
                 break;
             case userMessage.startsWith('.autostatus'):
                 const autoStatusArgs = userMessage.split(' ').slice(1);
