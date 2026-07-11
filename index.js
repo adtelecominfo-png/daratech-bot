@@ -7,7 +7,7 @@
  * 
  * Credits:
  * - Baileys Library by @adiwajshing
- * - Pair Code implementation inspired by TechGod143 & DGXEON
+ * - Pair Code implementation — Daratech Bot
  */
 require('./settings')
 const { Boom } = require('@hapi/boom')
