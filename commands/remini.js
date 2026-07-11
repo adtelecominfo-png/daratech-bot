@@ -50,17 +50,24 @@ async function reminiCommand(sock, chatId, message, args) {
             }
         }
 
-        // Call the Remini API
-        const apiUrl = `https://api.princetechn.com/api/tools/remini?apikey=prince_tech_api_azfsbshfb&url=${encodeURIComponent(imageUrl)}`;
-        
-        const response = await axios.get(apiUrl, {
-            timeout: 60000, // 60 second timeout (AI processing takes longer)
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
+        await sock.sendMessage(chatId, {
+            text: '🔄 Enhancing image with AI... This may take a minute.'
+        }, { quoted: message });
 
+        // Try primary API
+        let response;
+        try {
+            const apiUrl = `https://api.princetechn.com/api/tools/remini?apikey=prince_tech_api_azfsbshfb&url=${encodeURIComponent(imageUrl)}`;
+            response = await axios.get(apiUrl, {
+                timeout: 90000, // 90 second timeout (AI processing takes longer)
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            });
+        } catch (primaryErr) {
+            console.error('Remini primary API failed:', primaryErr.message);
+            throw primaryErr;
+        }
 
+        // Validate response
         if (response.data && response.data.success && response.data.result) {
             const result = response.data.result;
             
@@ -75,24 +82,39 @@ async function reminiCommand(sock, chatId, message, args) {
                     // Send the enhanced image
                     await sock.sendMessage(chatId, {
                         image: imageResponse.data,
-                        caption: '✨ *Image enhanced successfully!*\n\n𝗘𝗡𝗛𝗔𝗡𝗖𝗘𝗗 𝗕𝗬 𝗞𝗡𝗜𝗚𝗛𝗧-𝗕𝗢𝗧'
+                        caption: '✨ *Image enhanced successfully!*'
                     }, { quoted: message });
-                } else {
-                    throw new Error('Failed to download enhanced image');
+                    return;
                 }
-            } else {
-                throw new Error(result.message || 'Failed to enhance image');
             }
-        } else {
-            throw new Error('API returned invalid response');
         }
+
+        // If we reach here, something went wrong
+        const text = Buffer.from(response?.data || []).toString('utf8').slice(0, 300);
+        console.error('Remini API error:', text);
+        throw new Error('API returned invalid response: ' + text);
 
     } catch (error) {
         console.error('Remini Error:', error.message);
         
+        // Check if it's a specific API error
+        const isApiDead = error.message.includes('ENOTFOUND') || 
+                         error.message.includes('ECONNREFUSED') ||
+                         error.message.includes('404') ||
+                         error.message.includes('502') ||
+                         error.message.includes('503') ||
+                         error.message.includes('invalid response');
+        
         let errorMessage = '❌ Failed to enhance image.';
         
-        if (error.response?.status === 429) {
+        if (isApiDead) {
+            errorMessage = `❌ AI enhancement service is currently unavailable.\n\n` +
+                `💡 *Alternatives:*\n` +
+                `• Use https://www.remini.ai (official app)\n` +
+                `• Use https://www.letsennhance.io (free tier)\n` +
+                `• Use https://bigjpg.com (free tier)\n` +
+                `• Use Photoshop/AI tools locally`;
+        } else if (error.response?.status === 429) {
             errorMessage = '⏰ Rate limit exceeded. Please try again later.';
         } else if (error.response?.status === 400) {
             errorMessage = '❌ Invalid image URL or format.';
@@ -100,8 +122,6 @@ async function reminiCommand(sock, chatId, message, args) {
             errorMessage = '🔧 Server error. Please try again later.';
         } else if (error.code === 'ECONNABORTED') {
             errorMessage = '⏰ Request timeout. Please try again.';
-        } else if (error.message.includes('ENOTFOUND') || error.message.includes('ECONNREFUSED')) {
-            errorMessage = '🌐 Network error. Please check your connection.';
         } else if (error.message.includes('Error processing image')) {
             errorMessage = '❌ Image processing failed. Please try with a different image.';
         }

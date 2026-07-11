@@ -56,34 +56,57 @@ module.exports = {
                 }
             }
 
-        
-            // Call the remove background API
-            const apiUrl = `https://api.siputzx.my.id/api/iloveimg/removebg?image=${encodeURIComponent(imageUrl)}`;
-            
-            const response = await axios.get(apiUrl, {
-                responseType: 'arraybuffer',
-                timeout: 30000, // 30 second timeout
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-            });
+            await sock.sendMessage(chatId, {
+                text: '🔄 Removing background... This may take a moment.'
+            }, { quoted: message });
 
-            if (response.status === 200 && response.data) {
-                // Send the processed image
+            // Try primary API
+            let response;
+            try {
+                const apiUrl = `https://api.siputzx.my.id/api/iloveimg/removebg?image=${encodeURIComponent(imageUrl)}`;
+                response = await axios.get(apiUrl, {
+                    responseType: 'arraybuffer',
+                    timeout: 60000,
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                });
+            } catch (primaryErr) {
+                console.error('RemoveBG primary API failed:', primaryErr.message);
+                throw primaryErr;
+            }
+
+            // Validate response
+            const contentType = response.headers['content-type'] || '';
+            if (response.status === 200 && response.data && contentType.startsWith('image/')) {
                 await sock.sendMessage(chatId, {
                     image: response.data,
-                    caption: '✨ *Background removed successfully!*\n\n𝗣𝗥𝗢𝗖𝗘𝗦𝗦𝗘𝗗 𝗕𝗬 𝗞𝗡𝗜𝗚𝗛𝗧-𝗕𝗢𝗧'
+                    caption: '✨ *Background removed successfully!*'
                 }, { quoted: message });
             } else {
-                throw new Error('Failed to process image');
+                const text = Buffer.from(response.data || []).toString('utf8').slice(0, 300);
+                console.error('RemoveBG API error:', text);
+                throw new Error('API returned non-image: ' + text);
             }
 
         } catch (error) {
             console.error('RemoveBG Error:', error.message);
             
+            // Check if it's a specific API error
+            const isApiDead = error.message.includes('ENOTFOUND') || 
+                             error.message.includes('ECONNREFUSED') ||
+                             error.message.includes('404') ||
+                             error.message.includes('502') ||
+                             error.message.includes('503') ||
+                             error.message.includes('non-image');
+            
             let errorMessage = '❌ Failed to remove background.';
             
-            if (error.response?.status === 429) {
+            if (isApiDead) {
+                errorMessage = `❌ Background removal service is currently unavailable.\n\n` +
+                    `💡 *Alternatives:*\n` +
+                    `• Use https://remove.bg (free tier: 50 images/month)\n` +
+                    `• Use https://www.adobe.com/express/feature/image/remove-background\n` +
+                    `• Use Canva's background remover (Pro feature)`;
+            } else if (error.response?.status === 429) {
                 errorMessage = '⏰ Rate limit exceeded. Please try again later.';
             } else if (error.response?.status === 400) {
                 errorMessage = '❌ Invalid image URL or format.';
@@ -91,8 +114,6 @@ module.exports = {
                 errorMessage = '🔧 Server error. Please try again later.';
             } else if (error.code === 'ECONNABORTED') {
                 errorMessage = '⏰ Request timeout. Please try again.';
-            } else if (error.message.includes('ENOTFOUND') || error.message.includes('ECONNREFUSED')) {
-                errorMessage = '🌐 Network error. Please check your connection.';
             }
             
             await sock.sendMessage(chatId, { 

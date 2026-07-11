@@ -20,23 +20,37 @@ async function soraCommand(sock, chatId, message) {
             return;
         }
 
-        const apiUrl = `https://okatsu-rolezapiiz.vercel.app/ai/txt2video?text=${encodeURIComponent(input)}`;
-        const { data } = await axios.get(apiUrl, { timeout: 60000, headers: { 'user-agent': 'Mozilla/5.0' } });
+        // Try Pollinations for video (experimental, may not work for all prompts)
+        const apiUrl = `https://pollinations.ai/v/animation/${encodeURIComponent(input)}?width=512&height=512&nologo=true&seed=42`;
+        await sock.sendMessage(chatId, {
+            text: `🎬 *Text-to-Video* (experimental)\n\nGenerating: "${input}"\n\nNote: Video generation is slow and may not work for all prompts.`
+        }, { quoted: message });
 
-        const videoUrl = data?.videoUrl || data?.result || data?.data?.videoUrl;
-        if (!videoUrl) {
-            throw new Error('No videoUrl in API response');
+        const { data } = await axios.get(apiUrl, { timeout: 120000, responseType: 'arraybuffer', validateStatus: () => true, headers: { 'user-agent': 'Mozilla/5.0' } });
+
+        const contentType = data?.headers?.['content-type'] || '';
+        if (!contentType.startsWith('video/')) {
+            // Fallback: generate an image instead
+            const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(input + ', cinematic, high quality, 4k')}?width=1024&height=1024&nologo=true`;
+            await sock.sendMessage(chatId, {
+                text: '⚠️ Video generation unavailable. Sending image instead:'
+            }, { quoted: message });
+            await sock.sendMessage(chatId, {
+                image: { url: imgUrl },
+                caption: `Generated image for: ${input}`
+            }, { quoted: message });
+            return;
         }
 
         await sock.sendMessage(chatId, {
-            video: { url: videoUrl },
+            video: data,
             mimetype: 'video/mp4',
             caption: `Prompt: ${input}`
         }, { quoted: message });
 
     } catch (error) {
         console.error('[SORA] error:', error?.message || error);
-        await sock.sendMessage(chatId, { text: 'Failed to generate video. Try a different prompt later.' }, { quoted: message });
+        await sock.sendMessage(chatId, { text: '❌ Video generation failed. Try .imagine for images instead.' }, { quoted: message });
     }
 }
 
