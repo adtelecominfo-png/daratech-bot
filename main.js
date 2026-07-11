@@ -978,7 +978,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.tiktok') || userMessage.startsWith('.tt'):
                 await tiktokCommand(sock, chatId, message);
                 break;
-            case userMessage.startsWith('.gpt') || userMessage.startsWith('.gemini'):
+            case userMessage.startsWith('.gpt') || userMessage.startsWith('.gemini') || userMessage.startsWith('.ai'):
                 await aiCommand(sock, chatId, message);
                 break;
             case userMessage === '.catfact':
