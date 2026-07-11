@@ -29,17 +29,18 @@ async function imagineCommand(sock, chatId, message) {
         // Enhance the prompt with quality keywords
         const enhancedPrompt = enhancePrompt(imagePrompt);
 
-        // Make API request
-        const response = await axios.get(`https://shizoapi.onrender.com/api/ai/imagine?apikey=shizo&query=${encodeURIComponent(enhancedPrompt)}`, {
+        // Make API request - use Pollinations.ai (working)
+        const apiUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=1024&height=1024&nologo=true`;
+        const response = await axios.get(apiUrl, {
             responseType: 'arraybuffer',
-            validateStatus: () => true
+            validateStatus: () => true,
+            timeout: 60000
         });
 
         // Debug: log response info
         console.log('[IMAGINE] Status:', response.status);
         console.log('[IMAGINE] Content-Type:', response.headers['content-type']);
         console.log('[IMAGINE] Data length:', response.data?.length);
-        console.log('[IMAGINE] First 100 bytes:', Buffer.from(response.data).slice(0, 100).toString('utf8', 0, 100));
 
         // Check if response is actually an image
         const contentType = response.headers['content-type'] || '';
