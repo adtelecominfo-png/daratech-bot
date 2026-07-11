@@ -31,8 +31,23 @@ async function imagineCommand(sock, chatId, message) {
 
         // Make API request
         const response = await axios.get(`https://shizoapi.onrender.com/api/ai/imagine?apikey=shizo&query=${encodeURIComponent(enhancedPrompt)}`, {
-            responseType: 'arraybuffer'
+            responseType: 'arraybuffer',
+            validateStatus: () => true
         });
+
+        // Debug: log response info
+        console.log('[IMAGINE] Status:', response.status);
+        console.log('[IMAGINE] Content-Type:', response.headers['content-type']);
+        console.log('[IMAGINE] Data length:', response.data?.length);
+        console.log('[IMAGINE] First 100 bytes:', Buffer.from(response.data).slice(0, 100).toString('utf8', 0, 100));
+
+        // Check if response is actually an image
+        const contentType = response.headers['content-type'] || '';
+        if (!contentType.startsWith('image/')) {
+            const text = Buffer.from(response.data).toString('utf8');
+            console.error('[IMAGINE] Not an image, got:', text.slice(0, 500));
+            throw new Error('API returned non-image: ' + text.slice(0, 200));
+        }
 
         // Convert response to buffer
         const imageBuffer = Buffer.from(response.data);
