@@ -591,7 +591,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
                     await sock.sendMessage(chatId, { text: 'Please provide a valid position number for Tic-Tac-Toe move.'
 }, { quoted: message });
                 } else {
-                    tictactoeMove(sock, chatId, senderId, position);
+                    handleTicTacToeMove(sock, chatId, senderId, position);
                 }
                 break;
             case userMessage === '.topmembers':
@@ -863,9 +863,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 const autoStatusArgs = userMessage.split(' ').slice(1);
                 await autoStatusCommand(sock, chatId, message, autoStatusArgs);
                 break;
-            case userMessage.startsWith('.simp'):
-                await simpCommand(sock, chatId, message);
-                break;
+
             case userMessage.startsWith('.metallic'):
                 await textmakerCommand(sock, chatId, message, userMessage, 'metallic');
                 break;
@@ -989,7 +987,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await wallpaperCommand(sock, chatId, message);
                 break;
             case userMessage === '.jail':
-                await jailCommand(sock, chatId, message, quotedMessage);
+                {
+                    const quotedMessage = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+                    await jailCommand(sock, chatId, message, quotedMessage);
+                }
                 break;
             case userMessage.startsWith('.translate') || userMessage.startsWith('.trt'):
                 const commandLength = userMessage.startsWith('.translate') ? 10 : 4;

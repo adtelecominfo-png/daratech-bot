@@ -19,7 +19,7 @@ const axios = require('axios')
 const { handleMessages, handleGroupParticipantUpdate, handleStatus } = require('./main');
 const PhoneNumber = require('awesome-phonenumber')
 const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
-const { smsg, isUrl, generateMessageTag, getBuffer, getSizeMedia, fetch, await, sleep, reSize } = require('./lib/myfunc')
+const { smsg, isUrl, generateMessageTag, getBuffer, getSizeMedia, fetch, sleep, reSize } = require('./lib/myfunc')
 const {
     default: makeWASocket,
     useMultiFileAuthState,
@@ -70,7 +70,7 @@ setInterval(() => {
     }
 }, 30_000) // check every 30 seconds
 
-let phoneNumber = "911234567890"
+let phoneNumber = ""
 let owner = JSON.parse(fs.readFileSync('./data/owner.json'))
 
 global.botname = "DARATECH BOT"
@@ -181,21 +181,21 @@ async function startXeonBotInc() {
     })
 
     XeonBotInc.getName = (jid, withoutContact = false) => {
-        id = XeonBotInc.decodeJid(jid)
+        const decodedJid = XeonBotInc.decodeJid(jid)
         withoutContact = XeonBotInc.withoutContact || withoutContact
         let v
-        if (id.endsWith("@g.us")) return new Promise(async (resolve) => {
-            v = store.contacts[id] || {}
-            if (!(v.name || v.subject)) v = XeonBotInc.groupMetadata(id) || {}
-            resolve(v.name || v.subject || PhoneNumber('+' + id.replace('@s.whatsapp.net', '')).getNumber('international'))
+        if (decodedJid.endsWith("@g.us")) return new Promise(async (resolve) => {
+            v = store.contacts[decodedJid] || {}
+            if (!(v.name || v.subject)) v = XeonBotInc.groupMetadata(decodedJid) || {}
+            resolve(v.name || v.subject || PhoneNumber('+' + decodedJid.replace('@s.whatsapp.net', '')).getNumber('international'))
         })
-        else v = id === '0@s.whatsapp.net' ? {
-            id,
+        else v = decodedJid === '0@s.whatsapp.net' ? {
+            id: decodedJid,
             name: 'WhatsApp'
-        } : id === XeonBotInc.decodeJid(XeonBotInc.user.id) ?
+        } : decodedJid === XeonBotInc.decodeJid(XeonBotInc.user.id) ?
             XeonBotInc.user :
-            (store.contacts[id] || {})
-        return (withoutContact ? '' : v.name) || v.subject || v.verifiedName || PhoneNumber('+' + jid.replace('@s.whatsapp.net', '')).getNumber('international')
+            (store.contacts[decodedJid] || {})
+        return (withoutContact ? '' : v.name) || v.subject || v.verifiedName || PhoneNumber('+' + decodedJid.replace('@s.whatsapp.net', '')).getNumber('international')
     }
 
     XeonBotInc.public = true
