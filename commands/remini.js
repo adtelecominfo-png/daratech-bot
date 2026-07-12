@@ -3,7 +3,6 @@ const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const { uploadImage } = require('../lib/uploadImage');
 
 async function getQuotedOrOwnImageUrl(sock, message) {
-    // 1) Quoted image (highest priority)
     const quoted = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
     if (quoted?.imageMessage) {
         const stream = await downloadContentFromMessage(quoted.imageMessage, 'image');
@@ -12,8 +11,6 @@ async function getQuotedOrOwnImageUrl(sock, message) {
         const buffer = Buffer.concat(chunks);
         return await uploadImage(buffer);
     }
-
-    // 2) Image in the current message
     if (message.message?.imageMessage) {
         const stream = await downloadContentFromMessage(message.message.imageMessage, 'image');
         const chunks = [];
@@ -21,31 +18,27 @@ async function getQuotedOrOwnImageUrl(sock, message) {
         const buffer = Buffer.concat(chunks);
         return await uploadImage(buffer);
     }
-
     return null;
 }
 
 async function reminiCommand(sock, chatId, message, args) {
     try {
         let imageUrl = null;
-        
-        // Check if args contain a URL
+
         if (args.length > 0) {
             const url = args.join(' ');
             if (isValidUrl(url)) {
                 imageUrl = url;
             } else {
-                return sock.sendMessage(chatId, { 
-                    text: '❌ Invalid URL provided.\n\nUsage: `.remini https://example.com/image.jpg`' 
+                return sock.sendMessage(chatId, {
+                    text: '❌ Invalid URL provided.\n\nUsage: `.remini https://example.com/image.jpg`'
                 }, { quoted: message });
             }
         } else {
-            // Try to get image from message or quoted message
             imageUrl = await getQuotedOrOwnImageUrl(sock, message);
-            
             if (!imageUrl) {
-                return sock.sendMessage(chatId, { 
-                    text: '📸 *Remini AI Enhancement Command*\n\nUsage:\n• `.remini <image_url>`\n• Reply to an image with `.remini`\n• Send image with `.remini`\n\nExample: `.remini https://example.com/image.jpg`' 
+                return sock.sendMessage(chatId, {
+                    text: '📸 *Remini AI Enhancement Command*\n\nUsage:\n• `.remini <image_url>`\n• Reply to an image with `.remini`\n• Send image with `.remini`\n\nExample: `.remini https://example.com/image.jpg`'
                 }, { quoted: message });
             }
         }
@@ -54,92 +47,51 @@ async function reminiCommand(sock, chatId, message, args) {
             text: '🔄 Enhancing image with AI... This may take a minute.'
         }, { quoted: message });
 
-        // Try primary API
-        let response;
-        try {
-            const apiUrl = `https://api.princetechn.com/api/tools/remini?apikey=prince_tech_api_azfsbshfb&url=${encodeURIComponent(imageUrl)}`;
-            response = await axios.get(apiUrl, {
-                timeout: 90000, // 90 second timeout (AI processing takes longer)
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-            });
-        } catch (primaryErr) {
-            console.error('Remini primary API failed:', primaryErr.message);
-            throw primaryErr;
-        }
-
-        // Validate response
-        if (response.data && response.data.success && response.data.result) {
-            const result = response.data.result;
-            
-            if (result.image_url) {
-                // Download the enhanced image
-                const imageResponse = await axios.get(result.image_url, {
+        // Try various free enhancement APIs
+        const apis = [
+            async () => {
+                const resp = await axios.get(`https://zx-api-rest.vercel.app/api/tools/remini?url=${encodeURIComponent(imageUrl)}`, {
                     responseType: 'arraybuffer',
-                    timeout: 30000
+                    timeout: 60000
                 });
-                
-                if (imageResponse.status === 200 && imageResponse.data) {
-                    // Send the enhanced image
+                return resp.data;
+            },
+            async () => {
+                const resp = await axios.post('https://ai-image-enhancer-api.vercel.app/api/enhance', {
+                    image: imageUrl
+                }, { timeout: 60000 });
+                if (resp.data?.image) return Buffer.from(resp.data.image, 'base64');
+                throw new Error('No image data');
+            }
+        ];
+
+        for (const apiFn of apis) {
+            try {
+                const enhanced = await apiFn();
+                if (enhanced && enhanced.length > 100) {
                     await sock.sendMessage(chatId, {
-                        image: imageResponse.data,
+                        image: enhanced,
                         caption: '✨ *Image enhanced successfully!*'
                     }, { quoted: message });
                     return;
                 }
+            } catch (e) {
+                console.error('API attempt failed:', e.message);
             }
         }
 
-        // If we reach here, something went wrong
-        const text = Buffer.from(response?.data || []).toString('utf8').slice(0, 300);
-        console.error('Remini API error:', text);
-        throw new Error('API returned invalid response: ' + text);
+        throw new Error('All enhancement APIs failed');
 
     } catch (error) {
         console.error('Remini Error:', error.message);
-        
-        // Check if it's a specific API error
-        const isApiDead = error.message.includes('ENOTFOUND') || 
-                         error.message.includes('ECONNREFUSED') ||
-                         error.message.includes('404') ||
-                         error.message.includes('502') ||
-                         error.message.includes('503') ||
-                         error.message.includes('invalid response');
-        
-        let errorMessage = '❌ Failed to enhance image.';
-        
-        if (isApiDead) {
-            errorMessage = `❌ AI enhancement service is currently unavailable.\n\n` +
-                `💡 *Alternatives:*\n` +
-                `• Use https://www.remini.ai (official app)\n` +
-                `• Use https://www.letsennhance.io (free tier)\n` +
-                `• Use https://bigjpg.com (free tier)\n` +
-                `• Use Photoshop/AI tools locally`;
-        } else if (error.response?.status === 429) {
-            errorMessage = '⏰ Rate limit exceeded. Please try again later.';
-        } else if (error.response?.status === 400) {
-            errorMessage = '❌ Invalid image URL or format.';
-        } else if (error.response?.status === 500) {
-            errorMessage = '🔧 Server error. Please try again later.';
-        } else if (error.code === 'ECONNABORTED') {
-            errorMessage = '⏰ Request timeout. Please try again.';
-        } else if (error.message.includes('Error processing image')) {
-            errorMessage = '❌ Image processing failed. Please try with a different image.';
-        }
-        
-        await sock.sendMessage(chatId, { 
-            text: errorMessage 
+        await sock.sendMessage(chatId, {
+            text: `❌ Failed to enhance image.\n\n💡 *Alternatives:*\n• Use https://www.remini.ai (official app)\n• Use https://www.letsenhance.io (free tier)`
         }, { quoted: message });
     }
 }
 
-// Helper function to validate URL
 function isValidUrl(string) {
-    try {
-        new URL(string);
-        return true;
-    } catch (_) {
-        return false;
-    }
+    try { new URL(string); return true; } catch (_) { return false; }
 }
 
 module.exports = { reminiCommand };

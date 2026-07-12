@@ -10,14 +10,11 @@ async function handleSsCommand(sock, chatId, message, match) {
     }
 
     try {
-        // Show typing indicator
         await sock.presenceSubscribe(chatId);
         await sock.sendPresenceUpdate('composing', chatId);
 
-        // Extract URL from command
         const url = match.trim();
-        
-        // Validate URL
+
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
             return sock.sendMessage(chatId, {
                 text: '❌ Please provide a valid URL starting with http:// or https://',
@@ -25,33 +22,35 @@ async function handleSsCommand(sock, chatId, message, match) {
             });
         }
 
-        // Call the API
-        const apiUrl = `https://api.siputzx.my.id/api/tools/ssweb?url=${encodeURIComponent(url)}&theme=light&device=desktop`;
-        const response = await fetch(apiUrl, { headers: { 'accept': '*/*' } });
-        
-        if (!response.ok) {
-            throw new Error(`API responded with status: ${response.status}`);
+        // Try multiple screenshot APIs
+        const apis = [
+            `https://image.thum.io/get/width/1920/crop/675/noanimate/${encodeURIComponent(url)}`,
+            `https://api.screenshotmachine.com/?key=3e75e8&url=${encodeURIComponent(url)}&dimension=1024x768`,
+            `https://mini.s-shot.ru/ipad/1920/1080/?${encodeURIComponent(url)}`
+        ];
+
+        let imageBuffer = null;
+        for (const apiUrl of apis) {
+            try {
+                const response = await fetch(apiUrl, { timeout: 30000 });
+                if (response.ok) {
+                    imageBuffer = await response.buffer();
+                    if (imageBuffer.length > 1000) break;
+                }
+            } catch {}
         }
 
-        // Get the image buffer
-        const imageBuffer = await response.buffer();
+        if (!imageBuffer) throw new Error('All screenshot APIs failed');
 
-        // Send the screenshot
-        await sock.sendMessage(chatId, {
-            image: imageBuffer,
-        }, {
-            quoted: message
-        });
+        await sock.sendMessage(chatId, { image: imageBuffer }, { quoted: message });
 
     } catch (error) {
         console.error('❌ Error in ss command:', error);
         await sock.sendMessage(chatId, {
-            text: '❌ Failed to take screenshot. Please try again in a few minutes.\n\nPossible reasons:\n• Invalid URL\n• Website is blocking screenshots\n• Website is down\n• API service is temporarily unavailable',
+            text: '❌ Failed to take screenshot. Please try again in a few minutes.',
             quoted: message
         });
     }
 }
 
-module.exports = {
-    handleSsCommand
-}; 
+module.exports = { handleSsCommand };

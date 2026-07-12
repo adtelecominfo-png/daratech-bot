@@ -71,7 +71,8 @@ setInterval(() => {
 }, 30_000) // check every 30 seconds
 
 let phoneNumber = ""
-let owner = JSON.parse(fs.readFileSync('./data/owner.json'))
+let owner = {};
+try { owner = JSON.parse(fs.readFileSync('./data/owner.json')); } catch {}
 
 global.botname = "DARATECH BOT"
 global.themeemoji = "•"

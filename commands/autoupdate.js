@@ -1,7 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
+const https = require('https');
 const isOwnerOrSudo = require('../lib/isOwner');
+const settings = require('../settings');
 
 const STATE_FILE = path.join(process.cwd(), 'data', 'autoupdate.json');
 const DEFAULT_INTERVAL = 60000; // 60 seconds
@@ -13,6 +15,82 @@ function run(cmd) {
             resolve((stdout || '').toString());
         });
     });
+}
+
+function downloadFile(url, dest, visited = new Set()) {
+    return new Promise((resolve, reject) => {
+        try {
+            if (visited.has(url) || visited.size > 5) {
+                return reject(new Error('Too many redirects'));
+            }
+            visited.add(url);
+            const client = url.startsWith('https://') ? require('https') : require('http');
+            const req = client.get(url, {
+                headers: { 'User-Agent': 'Daratech-Bot-Updater/1.0', 'Accept': '*/*' }
+            }, res => {
+                if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+                    const location = res.headers.location;
+                    if (!location) return reject(new Error(`HTTP ${res.statusCode} without Location`));
+                    res.resume();
+                    return downloadFile(new URL(location, url).toString(), dest, visited).then(resolve).catch(reject);
+                }
+                if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+                const file = fs.createWriteStream(dest);
+                res.pipe(file);
+                file.on('finish', () => file.close(resolve));
+                file.on('error', err => { try { file.close(() => {}); } catch {}; fs.unlink(dest, () => reject(err)); });
+            });
+            req.on('error', err => { fs.unlink(dest, () => reject(err)); });
+        } catch (e) { reject(e); }
+    });
+}
+
+async function extractZip(zipPath, outDir) {
+    if (process.platform === 'win32') {
+        await run(`powershell -NoProfile -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${outDir.replace(/\\/g, '/')}' -Force"`);
+        return;
+    }
+    try { await run('command -v unzip'); await run(`unzip -o '${zipPath}' -d '${outDir}'`); return; } catch {}
+    try { await run('command -v 7z'); await run(`7z x -y '${zipPath}' -o'${outDir}'`); return; } catch {}
+    try { await run('busybox unzip -h'); await run(`busybox unzip -o '${zipPath}' -d '${outDir}'`); return; } catch {}
+    throw new Error("No system unzip tool found");
+}
+
+async function checkForUpdatesViaZip() {
+    const zipUrl = settings.updateZipUrl || process.env.UPDATE_ZIP_URL;
+    if (!zipUrl) throw new Error('No ZIP URL configured');
+    return { hasUpdate: true, method: 'zip' };
+}
+
+async function applyUpdateViaZip() {
+    const zipUrl = settings.updateZipUrl || process.env.UPDATE_ZIP_URL;
+    const tmpDir = path.join(process.cwd(), 'tmp');
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    const zipPath = path.join(tmpDir, 'autoupdate.zip');
+    await downloadFile(zipUrl, zipPath);
+    const extractTo = path.join(tmpDir, 'autoupdate_extract');
+    if (fs.existsSync(extractTo)) fs.rmSync(extractTo, { recursive: true, force: true });
+    await extractZip(zipPath, extractTo);
+    const [root] = fs.readdirSync(extractTo).map(n => path.join(extractTo, n));
+    const srcRoot = fs.existsSync(root) && fs.lstatSync(root).isDirectory() ? root : extractTo;
+    const ignore = ['node_modules', '.git', 'session', 'tmp', 'tmp/', 'temp', 'data', 'baileys_store.json'];
+    copyRecursive(srcRoot, process.cwd(), ignore);
+    try { fs.rmSync(extractTo, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(zipPath, { force: true }); } catch {}
+    try { await run('npm install --no-audit --no-fund'); } catch {}
+    return true;
+}
+
+function copyRecursive(src, dest, ignore = []) {
+    if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+    for (const entry of fs.readdirSync(src)) {
+        if (ignore.includes(entry)) continue;
+        const s = path.join(src, entry);
+        const d = path.join(dest, entry);
+        const stat = fs.lstatSync(s);
+        if (stat.isDirectory()) copyRecursive(s, d, ignore);
+        else fs.copyFileSync(s, d);
+    }
 }
 
 function readState() {
@@ -37,9 +115,14 @@ async function checkForUpdates() {
         await run('git fetch --all --prune');
         const local = (await run('git rev-parse HEAD').catch(() => '')).trim();
         const remote = (await run('git rev-parse origin/main').catch(() => '')).trim();
-        return { hasUpdate: local !== remote && local && remote, local, remote };
+        return { hasUpdate: local !== remote && local && remote, local, remote, method: 'git' };
     } catch (e) {
-        return { hasUpdate: false, error: e.message };
+        // Git unavailable, try zip fallback
+        try {
+            return await checkForUpdatesViaZip();
+        } catch (zipError) {
+            return { hasUpdate: false, error: `Git: ${e.message}; Zip: ${zipError.message}` };
+        }
     }
 }
 
@@ -50,8 +133,13 @@ async function applyUpdate() {
         await run('npm install --no-audit --no-fund');
         return true;
     } catch (e) {
-        console.error('[autoupdate] Failed to apply update:', e);
-        return false;
+        console.error('[autoupdate] Git update failed, trying zip fallback:', e.message);
+        try {
+            return await applyUpdateViaZip();
+        } catch (zipError) {
+            console.error('[autoupdate] Zip fallback also failed:', zipError.message);
+            return false;
+        }
     }
 }
 

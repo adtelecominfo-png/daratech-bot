@@ -58,86 +58,65 @@ async function tiktokCommand(sock, chatId, message) {
         });
 
         try {
-            // Use only Siputzx API
-            const apiUrl = `https://api.siputzx.my.id/api/d/tiktok?url=${encodeURIComponent(url)}`;
-
-
-
             let videoUrl = null;
             let audioUrl = null;
             let title = null;
+            let resolvedUrl = url;
 
-            // Call Siputzx API
+            // Resolve short URLs first
             try {
-                const response = await axios.get(apiUrl, { 
-                    timeout: 15000,
-                    headers: {
-                        'accept': '*/*',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                const headRes = await axios.head(url, { timeout: 5000, maxRedirects: 5 });
+                if (headRes.request?.res?.responseUrl) resolvedUrl = headRes.request.res.responseUrl;
+            } catch {}
+
+            // Try multiple APIs in order
+            const apis = [
+                async () => {
+                    const res = await axios.get(`https://api.siputzx.my.id/api/d/tiktok?url=${encodeURIComponent(resolvedUrl)}`, {
+                        timeout: 15000,
+                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                    });
+                    if (res.data?.data?.urls?.[0]) return { url: res.data.data.urls[0], title: res.data.data.metadata?.title };
+                    if (res.data?.data?.video_url) return { url: res.data.data.video_url, title: res.data.data.metadata?.title };
+                    if (res.data?.data?.download_url) return { url: res.data.data.download_url, title: res.data.data.metadata?.title };
+                    throw new Error('No URL in Siputzx response');
+                },
+                async () => {
+                    const res = await axios.get(`https://api.tikmate.app/api/lookup?url=${encodeURIComponent(resolvedUrl)}`, {
+                        timeout: 15000,
+                        headers: { 'User-Agent': 'Mozilla/5.0' }
+                    });
+                    if (res.data?.videoUrl) return { url: res.data.videoUrl, title: res.data.title };
+                    throw new Error('No URL in TikMate response');
+                },
+                async () => {
+                    const data = await ttdl(resolvedUrl);
+                    if (data?.data?.length > 0) {
+                        const video = data.data.find(m => m.type === 'video') || data.data[0];
+                        return { url: video.url, title: data.title || 'TikTok Video' };
                     }
-                });
-                
-                if (response.data && response.data.status) {
-                    // Check if the API returned video data
-                    if (response.data.data) {
-                        // Check for urls array first (this is the main response format)
-                        if (response.data.data.urls && Array.isArray(response.data.data.urls) && response.data.data.urls.length > 0) {
-                            // Use the first URL from the urls array (usually HD quality)
-                            videoUrl = response.data.data.urls[0];
-                            title = response.data.data.metadata?.title || "TikTok Video";
-                        } else if (response.data.data.video_url) {
-                            videoUrl = response.data.data.video_url;
-                            title = response.data.data.metadata?.title || "TikTok Video";
-                        } else if (response.data.data.url) {
-                            videoUrl = response.data.data.url;
-                            title = response.data.data.metadata?.title || "TikTok Video";
-                        } else if (response.data.data.download_url) {
-                            videoUrl = response.data.data.download_url;
-                            title = response.data.data.metadata?.title || "TikTok Video";
-                        } else {
-                            throw new Error("No video URL found in Siputzx API response");
-                        }
-                    } else {
-                        throw new Error("No data field in Siputzx API response");
-                    }
-                } else {
-                    throw new Error("Invalid Siputzx API response");
+                    throw new Error('No data from ttdl');
+                },
+                async () => {
+                    const res = await axios.get(`https://tikwm.com/api/?url=${encodeURIComponent(resolvedUrl)}`, {
+                        timeout: 15000,
+                        headers: { 'User-Agent': 'Mozilla/5.0' }
+                    });
+                    if (res.data?.data?.play) return { url: res.data.data.play, title: res.data.data.title };
+                    throw new Error('No URL in tikwm');
                 }
-            } catch (apiError) {
-                console.error(`Siputzx API failed: ${apiError.message}`);
-            }
+            ];
 
-            // If Siputzx API didn't work, try the original ttdl method
-            if (!videoUrl) {
+            for (const apiFn of apis) {
                 try {
-                    let downloadData = await ttdl(url);
-                    if (downloadData && downloadData.data && downloadData.data.length > 0) {
-                        const mediaData = downloadData.data;
-                        for (let i = 0; i < Math.min(20, mediaData.length); i++) {
-                            const media = mediaData[i];
-                            const mediaUrl = media.url;
-
-                            // Check if URL ends with common video extensions
-                            const isVideo = /\.(mp4|mov|avi|mkv|webm)$/i.test(mediaUrl) || 
-                                          media.type === 'video';
-
-                            if (isVideo) {
-                                await sock.sendMessage(chatId, {
-                                    video: { url: mediaUrl },
-                                    mimetype: "video/mp4",
-                                    caption: "𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗 𝗕𝗬 𝗞𝗡𝗜𝗚𝗛𝗧-𝗕𝗢𝗧"
-                                }, { quoted: message });
-                            } else {
-                                await sock.sendMessage(chatId, {
-                                    image: { url: mediaUrl },
-                                    caption: "𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗 𝗕𝗬 𝗞𝗡𝗜𝗚𝗛𝗧-𝗕𝗢𝗧"
-                                }, { quoted: message });
-                            }
-                        }
-                        return;
+                    const result = await apiFn();
+                    if (result?.url) {
+                        videoUrl = result.url;
+                        title = result.title || 'TikTok Video';
+                        break;
                     }
-                } catch (ttdlError) {
-                    console.error("ttdl fallback also failed:", ttdlError.message);
+                } catch (e) {
+                    console.error(`TikTok API attempt failed:`, e.message);
                 }
             }
 
