@@ -198,16 +198,35 @@ async function startXeonBotInc() {
             try {
                 await handleMessages(XeonBotInc, chatUpdate, true)
             } catch (err) {
-                console.error("Error in handleMessages:", err)
-                // Only try to send error message if we have a valid chatId
-                if (mek.key && mek.key.remoteJid) {
-                    await XeonBotInc.sendMessage(mek.key.remoteJid, {
-                        text: '❌ An error occurred while processing your message.'
-                    }).catch(console.error);
+                // Bad MAC / Failed to decrypt — corrupted Signal session entry.
+                // Clear the session for this JID so Baileys re-keys on the next message.
+                // Do NOT send an error reply (it would loop on the same bad session).
+                const isBadMac = err?.message?.includes('Bad MAC') ||
+                                 err?.message?.includes('Failed to decrypt') ||
+                                 err?.message?.includes('Session error');
+                if (isBadMac) {
+                    console.warn(`[session] Bad MAC from ${mek.key?.remoteJid} — clearing session entry`);
+                    try {
+                        // Clear the cached Signal session so next message triggers a fresh handshake
+                        if (XeonBotInc?.signalRepository?.clearSession) {
+                            await XeonBotInc.signalRepository.clearSession(mek.key.remoteJid);
+                        } else if (XeonBotInc?.authState?.keys?.clear) {
+                            // Older Baileys API fallback
+                            await XeonBotInc.authState.keys.clear(mek.key.remoteJid);
+                        }
+                    } catch (_) { /* ignore — session will re-establish naturally */ }
+                } else {
+                    console.error("Error in handleMessages:", err)
                 }
             }
         } catch (err) {
-            console.error("Error in messages.upsert:", err)
+            const isBadMac = err?.message?.includes('Bad MAC') ||
+                             err?.message?.includes('Failed to decrypt');
+            if (isBadMac) {
+                console.warn('[session] Bad MAC in upsert handler — skipping message');
+            } else {
+                console.error("Error in messages.upsert:", err)
+            }
         }
     })
 
