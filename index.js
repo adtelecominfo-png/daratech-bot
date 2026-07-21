@@ -91,10 +91,53 @@ const question = (text) => {
 }
 
 
+// ── Session helpers ──────────────────────────────────────────────────────────
+
+function restoreSessionFromEnv() {
+    const sessionId = process.env.SESSION_ID;
+    if (!sessionId) return;
+    const credsFile = path.join(process.cwd(), 'session', 'creds.json');
+    if (fs.existsSync(credsFile)) return; // already have session files — don't overwrite
+    try {
+        const decoded = Buffer.from(sessionId, 'base64').toString('utf8');
+        JSON.parse(decoded); // validate it's real JSON before writing
+        if (!fs.existsSync('./session')) fs.mkdirSync('./session', { recursive: true });
+        fs.writeFileSync(credsFile, decoded);
+        console.log('[session] Restored creds.json from SESSION_ID in env');
+    } catch (e) {
+        console.error('[session] Failed to restore from SESSION_ID:', e.message);
+    }
+}
+
+function saveSessionToEnv() {
+    try {
+        const credsFile = path.join(process.cwd(), 'session', 'creds.json');
+        if (!fs.existsSync(credsFile)) return;
+        const encoded = Buffer.from(fs.readFileSync(credsFile, 'utf8')).toString('base64');
+        const envPath = path.join(process.cwd(), '.env');
+        let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+        if (/^SESSION_ID=/m.test(content)) {
+            content = content.replace(/^SESSION_ID=.*/m, `SESSION_ID=${encoded}`);
+        } else {
+            content = content.trimEnd() + `\nSESSION_ID=${encoded}\n`;
+        }
+        fs.writeFileSync(envPath, content);
+    } catch (e) {
+        // non-fatal — session folder is still the live source of truth
+    }
+}
+
 async function startXeonBotInc() {
     try {
         let { version, isLatest } = await fetchLatestBaileysVersion()
+        // Ensure session dir exists and restore creds from env if needed
+        if (!fs.existsSync('./session')) fs.mkdirSync('./session', { recursive: true });
+        restoreSessionFromEnv();
         const { state, saveCreds } = await useMultiFileAuthState(`./session`)
+
+        // Only write SESSION_ID to env after a real successful connection
+        let sessionConnected = false;
+
         const msgRetryCounterCache = new NodeCache()
 
         const XeonBotInc = makeWASocket({
@@ -120,8 +163,11 @@ async function startXeonBotInc() {
             keepAliveIntervalMs: 10000,
         })
 
-        // Save credentials when they update
-        XeonBotInc.ev.on('creds.update', saveCreds)
+        // Save credentials when they update; also sync SESSION_ID to .env after real connection
+        XeonBotInc.ev.on('creds.update', async () => {
+            await saveCreds();
+            if (sessionConnected) saveSessionToEnv();
+        })
 
     store.bind(XeonBotInc.ev)
 
@@ -250,6 +296,8 @@ async function startXeonBotInc() {
         }
         
         if (connection == "open") {
+            sessionConnected = true;
+            saveSessionToEnv(); // persist creds immediately on first open
             console.log(chalk.magenta(` `))
             console.log(chalk.yellow(`🌿Connected to => ` + JSON.stringify(XeonBotInc.user, null, 2)))
 
@@ -382,10 +430,3 @@ process.on('unhandledRejection', (err) => {
     console.error('Unhandled Rejection:', err)
 })
 
-let file = require.resolve(__filename)
-fs.watchFile(file, () => {
-    fs.unwatchFile(file)
-    console.log(chalk.redBright(`Update ${__filename}`))
-    delete require.cache[file]
-    require(file)
-})
